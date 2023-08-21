@@ -1,7 +1,9 @@
 [package]
 name = "docext"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
+description = "docext"
+license = "Unlicense"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
