@@ -2,8 +2,8 @@ use {
     proc_macro::TokenStream,
     proc_macro2::{Ident, Span},
     quote::ToTokens,
+    rand::Rng,
     syn::{
-        parse_macro_input,
         punctuated::Punctuated,
         token::{Bracket, Eq, Pound},
         AttrStyle,
@@ -12,7 +12,6 @@ use {
         ExprLit,
         ImplItem,
         Item,
-        ItemMod,
         Lit,
         LitStr,
         Meta,
@@ -26,83 +25,145 @@ use {
 
 // TODO:
 // - Inline KaTeX instead of using jsdelivr.
-// - Add support to also stick docext directly on a fn, impl, etc.
 // - Add support for images.
 
 #[allow(dead_code)]
 mod katex;
 
 #[proc_macro_attribute]
-pub fn docext(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // TODO Ensure that _attr is empty and give a nice error message otherwise
-    let mut module = parse_macro_input!(item as ItemMod);
-    recurse(&mut module);
-    module.into_token_stream().into()
-}
+pub fn docext(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        panic!("#[docext] attribute does not take any arguments");
+    }
 
-/// Recurse down the module tree, adding TeX support to doc comments.
-fn recurse(module: &mut ItemMod) {
-    add_tex(&mut module.attrs);
-    let Some((_, items)) = module.content.as_mut() else {
-        return;
-    };
-
-    for item in items.iter_mut() {
-        match item {
-            Item::Mod(m) => recurse(m),
-            Item::Const(c) => add_tex(&mut c.attrs),
-            Item::Enum(e) => add_tex(&mut e.attrs),
-            Item::ExternCrate(_) => todo!(),
-            Item::Fn(f) => add_tex(&mut f.attrs),
-            Item::ForeignMod(m) => add_tex(&mut m.attrs),
-            Item::Macro(m) => add_tex(&mut m.attrs),
-            Item::Static(s) => add_tex(&mut s.attrs),
-            Item::Struct(s) => add_tex(&mut s.attrs),
-            Item::TraitAlias(t) => add_tex(&mut t.attrs),
-            Item::Type(t) => add_tex(&mut t.attrs),
-            Item::Union(u) => add_tex(&mut u.attrs),
-            Item::Impl(i) => {
-                add_tex(&mut i.attrs);
-                for item in i.items.iter_mut() {
-                    match item {
-                        ImplItem::Const(c) => add_tex(&mut c.attrs),
-                        ImplItem::Fn(f) => add_tex(&mut f.attrs),
-                        ImplItem::Type(t) => add_tex(&mut t.attrs),
-                        ImplItem::Macro(m) => add_tex(&mut m.attrs),
-                        ImplItem::Verbatim(_) => continue,
-                        _ => panic!("Unsupported impl item type"),
-                    }
-                }
-            }
-            Item::Trait(t) => {
-                add_tex(&mut t.attrs);
-                for item in t.items.iter_mut() {
-                    match item {
-                        TraitItem::Const(c) => add_tex(&mut c.attrs),
-                        TraitItem::Fn(f) => add_tex(&mut f.attrs),
-                        TraitItem::Type(t) => add_tex(&mut t.attrs),
-                        TraitItem::Macro(m) => add_tex(&mut m.attrs),
-                        TraitItem::Verbatim(_) => continue,
-                        _ => panic!("Unsupported trait item type"),
-                    }
-                }
-            }
-            Item::Use(_) | Item::Verbatim(_) => continue,
-            _ => panic!("Unsupported module item type"),
+    // Try interpreting the input as a module item.
+    match syn::parse::<Item>(item).unwrap() {
+        Item::Const(mut c) => {
+            add_tex(&mut c.attrs);
+            c.to_token_stream().into()
         }
+        Item::Enum(mut e) => {
+            add_tex(&mut e.attrs);
+            e.to_token_stream().into()
+        }
+        Item::ExternCrate(mut c) => {
+            add_tex(&mut c.attrs);
+            c.to_token_stream().into()
+        }
+        Item::Fn(mut f) => {
+            add_tex(&mut f.attrs);
+            f.to_token_stream().into()
+        }
+        Item::ForeignMod(mut m) => {
+            add_tex(&mut m.attrs);
+            m.to_token_stream().into()
+        }
+        Item::Impl(mut i) => {
+            add_tex(&mut i.attrs);
+            i.to_token_stream().into()
+        }
+        Item::Macro(mut m) => {
+            add_tex(&mut m.attrs);
+            m.to_token_stream().into()
+        }
+        Item::Mod(mut m) => {
+            add_tex(&mut m.attrs);
+            m.to_token_stream().into()
+        }
+        Item::Static(mut s) => {
+            add_tex(&mut s.attrs);
+            s.to_token_stream().into()
+        }
+        Item::Struct(mut s) => {
+            add_tex(&mut s.attrs);
+            s.to_token_stream().into()
+        }
+        Item::Trait(mut t) => {
+            add_tex(&mut t.attrs);
+            t.to_token_stream().into()
+        }
+        Item::TraitAlias(mut t) => {
+            add_tex(&mut t.attrs);
+            t.to_token_stream().into()
+        }
+        Item::Type(mut t) => {
+            add_tex(&mut t.attrs);
+            t.to_token_stream().into()
+        }
+        Item::Union(mut u) => {
+            add_tex(&mut u.attrs);
+            u.to_token_stream().into()
+        }
+        Item::Use(mut u) => {
+            add_tex(&mut u.attrs);
+            u.to_token_stream().into()
+        }
+        Item::Verbatim(v) => {
+            // Try interpreting the input as a trait item.
+            match syn::parse::<TraitItem>(v.into()).unwrap() {
+                TraitItem::Const(mut c) => {
+                    add_tex(&mut c.attrs);
+                    c.to_token_stream().into()
+                }
+                TraitItem::Fn(mut f) => {
+                    add_tex(&mut f.attrs);
+                    f.to_token_stream().into()
+                }
+                TraitItem::Type(mut t) => {
+                    add_tex(&mut t.attrs);
+                    t.to_token_stream().into()
+                }
+                TraitItem::Macro(mut m) => {
+                    add_tex(&mut m.attrs);
+                    m.to_token_stream().into()
+                }
+                TraitItem::Verbatim(v) => {
+                    // Try interpreting the input as an impl item.
+                    match syn::parse::<ImplItem>(v.into()).unwrap() {
+                        ImplItem::Const(mut c) => {
+                            add_tex(&mut c.attrs);
+                            c.to_token_stream().into()
+                        }
+                        ImplItem::Fn(mut f) => {
+                            add_tex(&mut f.attrs);
+                            f.to_token_stream().into()
+                        }
+                        ImplItem::Type(mut t) => {
+                            add_tex(&mut t.attrs);
+                            t.to_token_stream().into()
+                        }
+                        ImplItem::Macro(mut m) => {
+                            add_tex(&mut m.attrs);
+                            m.to_token_stream().into()
+                        }
+                        other => panic!("Unsupported impl item type {other:#?}"),
+                    }
+                }
+                other => panic!("Unsupported trait item type {other:#?}"),
+            }
+        }
+        other => panic!("Unsupported item type {other:#?}"),
     }
 }
 
+/// Add KaTeX to the doc comment of the given item.
 fn add_tex(attrs: &mut Vec<Attribute>) {
+    // Error if the item doesn't have a doc comment, since #[docext] wouldn't do
+    // anything useful in this case.
     if !attrs.iter_mut().any(|attr| {
         let Ok(name_value) = attr.meta.require_name_value() else {
             return false;
         };
         name_value.path.is_ident("doc") && name_value.path.segments.len() == 1
     }) {
-        return;
+        panic!("#[docext] only applies to items with doc comments");
     }
 
+    // Add the KaTeX CSS and JS to the doc comment, enabling TeX rending. The script
+    // which does the actually rendering calls `renderMathInElement` on its
+    // parent, so that the TeX is only loaded in the doc comment, not the entire
+    // page. The script gets its parent by using a unique random ID.
+    let id: u128 = rand::thread_rng().gen();
     attrs.push(Attribute {
         pound_token: Pound::default(),
         style: AttrStyle::Outer,
@@ -122,18 +183,20 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
             value: Expr::Lit(ExprLit {
                 attrs: Default::default(),
                 lit: Lit::Str(LitStr::new(
-                    r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous">
-                    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script>
-                    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
-                    <script>
-                        var docExtTexSupport;
-                        if (!docExtTexSupport) {
-                            docExtTexSupport = true;
-                            document.addEventListener("DOMContentLoaded", function() {
-                                renderMathInElement(document.body);
-                            });
-                        }
-                    </script>"#,
+                    &format!(r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous">
+                        <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script>
+                        <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
+                        <script id={id}>
+                            document.addEventListener("DOMContentLoaded", function() {{
+                                var thisScript = document.getElementById("{id}");
+                                renderMathInElement(thisScript.parentElement, {{
+                                    delimiters: [
+                                        {{ left: '$$', right: '$$', display: true }},
+                                        {{ left: '$', right: '$', display: false }},
+                                    ],
+                                }});
+                            }});
+                        </script>"#),
                     Span::call_site(),
                 )),
             }),

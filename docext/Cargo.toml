@@ -1,6 +1,6 @@
 [package]
 name = "docext"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 description = "docext"
 license = "Unlicense"
@@ -12,3 +12,4 @@ proc-macro = true
 quote = "1.0"
 syn = { version  = "2.0", features = ["full", "extra-traits"] }
 proc-macro2 = "1.0"
+rand = "0.8.5"
