@@ -1,0 +1,14 @@
+[package]
+name = "docext"
+version = "0.0.1"
+edition = "2021"
+description = "docext"
+license = "Unlicense"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0"
+syn = { version  = "2.0", features = ["full", "extra-traits"] }
+proc-macro2 = "1.0"
