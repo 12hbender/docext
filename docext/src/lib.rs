@@ -1,7 +1,8 @@
 use {
     proc_macro::TokenStream,
-    proc_macro2::{Delimiter, Group, Ident, Span},
+    proc_macro2::{Ident, Span},
     quote::ToTokens,
+    regex::Regex,
     syn::{
         punctuated::Punctuated,
         token::{Bracket, Eq, Pound},
@@ -23,12 +24,7 @@ use {
 };
 
 // TODO:
-// - Inline KaTeX instead of using jsdelivr.
 // - Add support for images.
-// - Return proper errors instead of panicking (probably).
-
-#[allow(dead_code)]
-mod katex;
 
 #[proc_macro_attribute]
 pub fn docext(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -190,14 +186,20 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
     let doc = collapse_math(&doc);
 
     // Add the doc comment back to the attrs.
-    attrs.push(Attribute {
-        pound_token: Pound {
-            spans: [Span::call_site()],
-        },
+    attrs.push(doc_attribute(&doc));
+
+    // Add the KaTeX CSS and JS to the doc comment, enabling TeX rending. The script
+    // which does the actual rendering calls `renderMathInElement` on its
+    // parent, so that the TeX is only loaded in the doc comment, not the entire
+    // page.
+    attrs.push(doc_attribute(r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script><script>var d=document;var c=d.currentScript;d.addEventListener("DOMContentLoaded",function(){renderMathInElement(c.parentElement,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})});</script>"#));
+}
+
+fn doc_attribute(doc: &str) -> Attribute {
+    Attribute {
+        pound_token: Pound::default(),
         style: AttrStyle::Outer,
-        bracket_token: Bracket {
-            span: Group::new(Delimiter::Bracket, proc_macro2::TokenStream::new()).delim_span(),
-        },
+        bracket_token: Bracket::default(),
         meta: Meta::NameValue(MetaNameValue {
             path: Path {
                 leading_colon: None,
@@ -206,57 +208,13 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
                     arguments: PathArguments::None,
                 }]),
             },
-            eq_token: Eq {
-                spans: [Span::call_site()],
-            },
-            value: Expr::Lit(ExprLit {
-                attrs: Default::default(),
-                lit: Lit::Str(LitStr::new(&doc, Span::call_site())),
-            }),
-        }),
-    });
-
-    // Add the KaTeX CSS and JS to the doc comment, enabling TeX rending. The script
-    // which does the actual rendering calls `renderMathInElement` on its
-    // parent, so that the TeX is only loaded in the doc comment, not the entire
-    // page.
-    attrs.push(Attribute {
-        pound_token: Pound::default(),
-        style: AttrStyle::Outer,
-        bracket_token: Bracket::default(),
-        meta: Meta::NameValue(MetaNameValue {
-            path: Path {
-                leading_colon: None,
-                segments: Punctuated::from_iter(
-                    [PathSegment {
-                        ident: Ident::new("doc", Span::call_site()),
-                        arguments: PathArguments::None,
-                    }]
-                ),
-            },
             eq_token: Eq::default(),
             value: Expr::Lit(ExprLit {
                 attrs: Default::default(),
-                lit: Lit::Str(LitStr::new(
-                    &format!(r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous">
-                        <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script>
-                        <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
-                        <script>
-                            var currentScript = document.currentScript;
-                            document.addEventListener("DOMContentLoaded", function() {{
-                                renderMathInElement(currentScript.parentElement, {{
-                                    delimiters: [
-                                        {{ left: '$$', right: '$$', display: true }},
-                                        {{ left: '$', right: '$', display: false }},
-                                    ],
-                                }});
-                            }});
-                        </script>"#),
-                    Span::call_site(),
-                )),
+                lit: Lit::Str(LitStr::new(doc, Span::call_site())),
             }),
         }),
-    });
+    }
 }
 
 /// Replace all newlines in math mode with spaces. This avoids rendering issues.
@@ -265,6 +223,8 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
 ///
 /// This is implemented based on the [KaTeX auto-render script](https://github.com/KaTeX/KaTeX/blob/4f1d9166749ca4bd669381b84b45589f1500a476/contrib/auto-render/splitAtDelimiters.js).
 fn collapse_math(mut text: &str) -> String {
+    // Regex to replace all continuous whitespace with a single space.
+    let re = Regex::new(r"\s+").unwrap();
     let mut result = String::new();
     result.reserve(text.len());
     loop {
@@ -285,8 +245,9 @@ fn collapse_math(mut text: &str) -> String {
         };
         match find_math_end(text, delim, start) {
             Some(end) => {
-                // Replace all newlines in the math block with spaces.
-                result.push_str(&text[start..end].replace('\n', " "));
+                // Replace all newlines and other continuous whitespace in the math block with a
+                // single space.
+                result.push_str(&re.replace_all(&text[start..end], " "));
                 text = &text[end..];
             }
             None => {
