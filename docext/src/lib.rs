@@ -2,7 +2,6 @@ use {
     proc_macro::TokenStream,
     proc_macro2::{Ident, Span},
     quote::ToTokens,
-    rand::Rng,
     syn::{
         punctuated::Punctuated,
         token::{Bracket, Eq, Pound},
@@ -26,6 +25,7 @@ use {
 // TODO:
 // - Inline KaTeX instead of using jsdelivr.
 // - Add support for images.
+// - Return proper errors instead of panicking (probably).
 
 #[allow(dead_code)]
 mod katex;
@@ -150,7 +150,7 @@ pub fn docext(attr: TokenStream, item: TokenStream) -> TokenStream {
 fn add_tex(attrs: &mut Vec<Attribute>) {
     // Error if the item doesn't have a doc comment, since #[docext] wouldn't do
     // anything useful in this case.
-    if !attrs.iter_mut().any(|attr| {
+    if !attrs.iter().any(|attr| {
         let Ok(name_value) = attr.meta.require_name_value() else {
             return false;
         };
@@ -159,11 +159,42 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
         panic!("#[docext] only applies to items with doc comments");
     }
 
+    // Collapse all multi-line math blocks into single lines to avoid rendering
+    // issues.
+    *attrs = std::mem::take(attrs)
+        .into_iter()
+        .map(|attr| {
+            let Ok(name_value) = attr.meta.require_name_value() else {
+                return attr;
+            };
+            if !name_value.path.is_ident("doc") || name_value.path.segments.len() != 1 {
+                return attr;
+            }
+            match &name_value.value {
+                Expr::Lit(ExprLit { attrs, lit }) => Attribute {
+                    meta: Meta::NameValue(MetaNameValue {
+                        value: Expr::Lit(ExprLit {
+                            attrs: attrs.clone(),
+                            lit: match lit {
+                                Lit::Str(s) => {
+                                    Lit::Str(LitStr::new(&collapse_math(&s.value()), s.span()))
+                                }
+                                _ => return attr,
+                            },
+                        }),
+                        ..name_value.clone()
+                    }),
+                    ..attr
+                },
+                _ => attr,
+            }
+        })
+        .collect();
+
     // Add the KaTeX CSS and JS to the doc comment, enabling TeX rending. The script
-    // which does the actually rendering calls `renderMathInElement` on its
+    // which does the actual rendering calls `renderMathInElement` on its
     // parent, so that the TeX is only loaded in the doc comment, not the entire
-    // page. The script gets its parent by using a unique random ID.
-    let id: u128 = rand::thread_rng().gen();
+    // page.
     attrs.push(Attribute {
         pound_token: Pound::default(),
         style: AttrStyle::Outer,
@@ -176,30 +207,106 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
                         ident: Ident::new("doc", Span::call_site()),
                         arguments: PathArguments::None,
                     }]
-                    .into_iter(),
                 ),
             },
             eq_token: Eq::default(),
             value: Expr::Lit(ExprLit {
                 attrs: Default::default(),
                 lit: Lit::Str(LitStr::new(
-                    &format!(r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous">
+                    r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous">
                         <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script>
                         <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
-                        <script id={id}>
+                        <script>
+                            var currentScript = document.currentScript;
                             document.addEventListener("DOMContentLoaded", function() {{
-                                var thisScript = document.getElementById("{id}");
-                                renderMathInElement(thisScript.parentElement, {{
+                                renderMathInElement(currentScript.parentElement, {{
                                     delimiters: [
                                         {{ left: '$$', right: '$$', display: true }},
                                         {{ left: '$', right: '$', display: false }},
                                     ],
                                 }});
                             }});
-                        </script>"#),
+                        </script>"#,
                     Span::call_site(),
                 )),
             }),
         }),
     });
 }
+
+/// Replace all newlines in math mode with spaces. This avoids rendering issues.
+/// For example, starting a line with "-" (minus) would cause the markdown to
+/// render as a list and completely break the math.
+///
+/// This is implemented based on the [KaTeX auto-render script](https://github.com/KaTeX/KaTeX/blob/4f1d9166749ca4bd669381b84b45589f1500a476/contrib/auto-render/splitAtDelimiters.js).
+fn collapse_math(mut text: &str) -> String {
+    let mut result = String::new();
+    result.reserve(text.len());
+    loop {
+        dbg!(&result);
+
+        // Find the start of the math block.
+        let Some(start) = text.find('$') else {
+            // There are no more math blocks.
+            result.push_str(text);
+            break;
+        };
+
+        // The text before the math block does not need to change.
+        result.push_str(&text[..start]);
+
+        let delim = if text[start..].starts_with("$$") {
+            "$$"
+        } else {
+            "$"
+        };
+        match dbg!(find_math_end(text, delim, start)) {
+            Some(end) => {
+                // Replace all newlines in the math block with spaces.
+                dbg!(&text[start..end]);
+                result.push_str(&text[start..end].replace('\n', " "));
+                text = &text[end..];
+            }
+            None => {
+                // There is no closing delimiter, so there is no math block. The text does not
+                // need to change.
+                result.push_str(&text[start..]);
+                break;
+            }
+        }
+    }
+    result
+}
+
+/// Find the end of the math block, while respecting braces. Return the byte
+/// index pointing after the end of the closing delimiter of the math block.
+fn find_math_end(text: &str, delim: &str, start: usize) -> Option<usize> {
+    let start = start + delim.len();
+    let mut chars = text[start..].char_indices().fuse().peekable();
+    let mut depth = 0;
+    while let Some((i, c)) = chars.next() {
+        if c == '{' {
+            depth += 1;
+        } else if c == '}' {
+            depth -= 1;
+        } else if c == '\\' {
+            // Skip the next character, since it is escaped.
+            chars.next();
+        } else if c == '$' && depth <= 0 {
+            // Might be the end of the math block.
+
+            if delim == "$" {
+                return Some(start + i + 1);
+            }
+
+            // The delim is "$$", so check the next character.
+            if let Some((i, '$')) = chars.peek() {
+                return Some(start + *i + 1);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod test_collapse;
