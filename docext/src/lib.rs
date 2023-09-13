@@ -1,6 +1,6 @@
 use {
     proc_macro::TokenStream,
-    proc_macro2::{Ident, Span},
+    proc_macro2::{Delimiter, Group, Ident, Span},
     quote::ToTokens,
     syn::{
         punctuated::Punctuated,
@@ -159,37 +159,62 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
         panic!("#[docext] only applies to items with doc comments");
     }
 
-    // Collapse all multi-line math blocks into single lines to avoid rendering
-    // issues.
+    let mut doc = String::new();
+
+    // Remove doc comments from the attrs and collect them into a single string.
     *attrs = std::mem::take(attrs)
         .into_iter()
-        .map(|attr| {
+        .filter_map(|attr| {
             let Ok(name_value) = attr.meta.require_name_value() else {
-                return attr;
+                return Some(attr);
             };
             if !name_value.path.is_ident("doc") || name_value.path.segments.len() != 1 {
-                return attr;
+                return Some(attr);
             }
-            match &name_value.value {
-                Expr::Lit(ExprLit { attrs, lit }) => Attribute {
-                    meta: Meta::NameValue(MetaNameValue {
-                        value: Expr::Lit(ExprLit {
-                            attrs: attrs.clone(),
-                            lit: match lit {
-                                Lit::Str(s) => {
-                                    Lit::Str(LitStr::new(&collapse_math(&s.value()), s.span()))
-                                }
-                                _ => return attr,
-                            },
-                        }),
-                        ..name_value.clone()
-                    }),
-                    ..attr
-                },
-                _ => attr,
-            }
+
+            let Expr::Lit(ExprLit {
+                lit: Lit::Str(lit), ..
+            }) = &name_value.value
+            else {
+                return Some(attr);
+            };
+
+            doc.push_str(&lit.value());
+            doc.push('\n');
+            None
         })
         .collect();
+
+    // Collapse all multi-line math blocks into single lines to avoid rendering
+    // issues.
+    let doc = collapse_math(&doc);
+
+    // Add the doc comment back to the attrs.
+    attrs.push(Attribute {
+        pound_token: Pound {
+            spans: [Span::call_site()],
+        },
+        style: AttrStyle::Outer,
+        bracket_token: Bracket {
+            span: Group::new(Delimiter::Bracket, proc_macro2::TokenStream::new()).delim_span(),
+        },
+        meta: Meta::NameValue(MetaNameValue {
+            path: Path {
+                leading_colon: None,
+                segments: Punctuated::from_iter([PathSegment {
+                    ident: Ident::new("doc", Span::call_site()),
+                    arguments: PathArguments::None,
+                }]),
+            },
+            eq_token: Eq {
+                spans: [Span::call_site()],
+            },
+            value: Expr::Lit(ExprLit {
+                attrs: Default::default(),
+                lit: Lit::Str(LitStr::new(&doc, Span::call_site())),
+            }),
+        }),
+    });
 
     // Add the KaTeX CSS and JS to the doc comment, enabling TeX rending. The script
     // which does the actual rendering calls `renderMathInElement` on its
@@ -213,7 +238,7 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
             value: Expr::Lit(ExprLit {
                 attrs: Default::default(),
                 lit: Lit::Str(LitStr::new(
-                    r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous">
+                    &format!(r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous">
                         <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script>
                         <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
                         <script>
@@ -226,7 +251,7 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
                                     ],
                                 }});
                             }});
-                        </script>"#,
+                        </script>"#),
                     Span::call_site(),
                 )),
             }),
@@ -235,16 +260,14 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
 }
 
 /// Replace all newlines in math mode with spaces. This avoids rendering issues.
-/// For example, starting a line with "-" (minus) would cause the markdown to
-/// render as a list and completely break the math.
+/// For example, starting a line with "-" (minus) in math mode would cause the
+/// markdown to render as a list and completely break the math.
 ///
 /// This is implemented based on the [KaTeX auto-render script](https://github.com/KaTeX/KaTeX/blob/4f1d9166749ca4bd669381b84b45589f1500a476/contrib/auto-render/splitAtDelimiters.js).
 fn collapse_math(mut text: &str) -> String {
     let mut result = String::new();
     result.reserve(text.len());
     loop {
-        dbg!(&result);
-
         // Find the start of the math block.
         let Some(start) = text.find('$') else {
             // There are no more math blocks.
@@ -260,10 +283,9 @@ fn collapse_math(mut text: &str) -> String {
         } else {
             "$"
         };
-        match dbg!(find_math_end(text, delim, start)) {
+        match find_math_end(text, delim, start) {
             Some(end) => {
                 // Replace all newlines in the math block with spaces.
-                dbg!(&text[start..end]);
                 result.push_str(&text[start..end].replace('\n', " "));
                 text = &text[end..];
             }
