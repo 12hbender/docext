@@ -1,0 +1,10 @@
+For the image functionality: use pulldown_cmark since that's what rustdoc uses,
+use env!("CARGO_MANIFEST_DIR") and file!(), the included files should be relative to the
+source file. This makes sense: since the documentation is right there with the code,
+so should be the related doc files like images. The images should not all be in the
+root dir, this doesn't make sense.
+
+Whenever cmark gives an image event, change the source string (cmark gives out the range
+in the original string, which makes this possible) to point to the base64 URL of the local
+file. You can use std::fs for file I/O. You also have to check if the image is a URL or a local
+file, you can use the url library for this.

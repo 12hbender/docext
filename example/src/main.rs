@@ -11,6 +11,38 @@ use docext::docext;
 #[docext]
 pub trait BrokenExample {}
 
+/// $$
+/// \{
+/// - x
+/// $$
+#[docext]
+pub trait BrokenExample2 {}
+
+/// $$
+/// {
+/// - x
+/// }
+/// $$
+#[docext]
+pub trait BrokenExample3 {}
+
+/// The brace is not closed.
+///
+/// $$
+/// {
+/// - x
+/// $$
+#[docext]
+pub trait IntentionallyInvalidTeX {}
+
+/// $$
+/// a
+/// \\
+/// b
+/// $$
+#[docext]
+pub trait BackslashAsNewline {}
+
 fn main() {
     println!("Hello, world!");
 }

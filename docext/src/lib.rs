@@ -23,6 +23,8 @@ use {
     },
 };
 
+mod parser;
+
 // TODO:
 // - Add support for images.
 
@@ -181,8 +183,8 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
         })
         .collect();
 
-    // Collapse all multi-line math blocks into single lines to avoid rendering
-    // issues.
+    // Collapse all multi-line math blocks into single lines inside `div` elements.
+    // This avoids rendering issues.
     let doc = collapse_math(&doc);
 
     // Add the doc comment back to the attrs.
@@ -195,6 +197,7 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
     attrs.push(doc_attribute(r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script><script>var d=document;var c=d.currentScript;d.addEventListener("DOMContentLoaded",function(){renderMathInElement(c.parentElement,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})});</script>"#));
 }
 
+/// Create a #[doc] attribute with the given doc comment.
 fn doc_attribute(doc: &str) -> Attribute {
     Attribute {
         pound_token: Pound::default(),
@@ -217,79 +220,22 @@ fn doc_attribute(doc: &str) -> Attribute {
     }
 }
 
-/// Replace all newlines in math mode with spaces. This avoids rendering issues.
-/// For example, starting a line with "-" (minus) in math mode would cause the
-/// markdown to render as a list and completely break the math.
+/// Replace all newlines in math blocks with spaces and place the math blocks
+/// inside `<div>` elements.
 ///
-/// This is implemented based on the [KaTeX auto-render script](https://github.com/KaTeX/KaTeX/blob/4f1d9166749ca4bd669381b84b45589f1500a476/contrib/auto-render/splitAtDelimiters.js).
-fn collapse_math(mut text: &str) -> String {
+/// This avoids rendering issues. For example, starting a line with "-" (minus)
+/// in the math block would otherwise cause the markdown to render as a list and
+/// completely break the math, or writing `[a](b)` would render as a link.
+fn collapse_math(text: &str) -> String {
     // Regex to replace all continuous whitespace with a single space.
     let re = Regex::new(r"\s+").unwrap();
-    let mut result = String::new();
-    result.reserve(text.len());
-    loop {
-        // Find the start of the math block.
-        let Some(start) = text.find('$') else {
-            // There are no more math blocks.
-            result.push_str(text);
-            break;
-        };
-
-        // The text before the math block does not need to change.
-        result.push_str(&text[..start]);
-
-        let delim = if text[start..].starts_with("$$") {
-            "$$"
-        } else {
-            "$"
-        };
-        match find_math_end(text, delim, start) {
-            Some(end) => {
-                // Replace all newlines and other continuous whitespace in the math block with a
-                // single space.
-                result.push_str(&re.replace_all(&text[start..end], " "));
-                text = &text[end..];
+    parser::parse_math(text)
+        .into_iter()
+        .map(|event| match event {
+            parser::Event::Text(text) => text.to_owned(),
+            parser::Event::Math(math) => {
+                format!("<div>{}</div>", re.replace_all(math, " "))
             }
-            None => {
-                // There is no closing delimiter, so there is no math block. The text does not
-                // need to change.
-                result.push_str(&text[start..]);
-                break;
-            }
-        }
-    }
-    result
+        })
+        .collect()
 }
-
-/// Find the end of the math block, while respecting braces. Return the byte
-/// index pointing after the end of the closing delimiter of the math block.
-fn find_math_end(text: &str, delim: &str, start: usize) -> Option<usize> {
-    let start = start + delim.len();
-    let mut chars = text[start..].char_indices().fuse().peekable();
-    let mut depth = 0;
-    while let Some((i, c)) = chars.next() {
-        if c == '{' {
-            depth += 1;
-        } else if c == '}' {
-            depth -= 1;
-        } else if c == '\\' {
-            // Skip the next character, since it is escaped.
-            chars.next();
-        } else if c == '$' && depth <= 0 {
-            // Might be the end of the math block.
-
-            if delim == "$" {
-                return Some(start + i + 1);
-            }
-
-            // The delim is "$$", so check the next character.
-            if let Some((i, '$')) = chars.peek() {
-                return Some(start + *i + 1);
-            }
-        }
-    }
-    None
-}
-
-#[cfg(test)]
-mod test_collapse;
