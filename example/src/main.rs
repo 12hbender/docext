@@ -2,6 +2,8 @@
 
 use docext::docext;
 
+/// Should render as "1 - 2" followed by a pi symbol in the next line.
+///
 /// $$1
 /// -
 /// 2\newline
@@ -11,6 +13,8 @@ use docext::docext;
 #[docext]
 pub trait BrokenExample {}
 
+/// Should render as "{ -x".
+///
 /// $$
 /// \{
 /// - x
@@ -18,6 +22,8 @@ pub trait BrokenExample {}
 #[docext]
 pub trait BrokenExample2 {}
 
+/// Should render as "-x".
+///
 /// $$
 /// {
 /// - x
@@ -26,7 +32,7 @@ pub trait BrokenExample2 {}
 #[docext]
 pub trait BrokenExample3 {}
 
-/// The brace is not closed.
+/// Should not be rendered as math, because the brace is not closed:
 ///
 /// $$
 /// {
@@ -35,6 +41,8 @@ pub trait BrokenExample3 {}
 #[docext]
 pub trait IntentionallyInvalidTeX {}
 
+/// Should contain a newline:
+///
 /// $$
 /// a
 /// \\
@@ -42,6 +50,22 @@ pub trait IntentionallyInvalidTeX {}
 /// $$
 #[docext]
 pub trait BackslashAsNewline {}
+
+/// $\pi$
+///
+/// Should not be rendered as a link:
+///
+/// $$
+/// [a](b)
+/// $$
+///
+/// Inline:
+///
+/// Hello $[a](b)$ world.
+///
+/// Hello $\int_0^{\infty}, \sigma = \pi$ world.
+#[docext]
+pub trait LinkGoneWrong {}
 
 fn main() {
     println!("Hello, world!");

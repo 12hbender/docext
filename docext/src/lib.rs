@@ -183,18 +183,19 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
         })
         .collect();
 
-    // Collapse all multi-line math blocks into single lines inside `div` elements.
-    // This avoids rendering issues.
+    // Pre-process the math.
     let doc = collapse_math(&doc);
 
     // Add the doc comment back to the attrs.
     attrs.push(doc_attribute(&doc));
 
-    // Add the KaTeX CSS and JS to the doc comment, enabling TeX rending. The script
-    // which does the actual rendering calls `renderMathInElement` on its
-    // parent, so that the TeX is only loaded in the doc comment, not the entire
-    // page.
-    attrs.push(doc_attribute(r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script><script>var d=document;var c=d.currentScript;d.addEventListener("DOMContentLoaded",function(){renderMathInElement(c.parentElement,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]})});</script>"#));
+    // Add the KaTeX CSS and JS to the doc comment, enabling TeX rending. The
+    // rendering script first copies the TeX from the data-tex attribute into the
+    // inner HTML of the span itself to ensure that the math is unaffected by
+    // markdown rendering (See the collapse_math function). Then it calls
+    // `renderMathInElement` on its parent, so that the TeX is only loaded in
+    // the doc comment, not the entire page.
+    attrs.push(doc_attribute(r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous"><script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script><script>var d=document;var c=d.currentScript;var t=c.parentElement.getElementsByClassName("docext-math");for(var i=0;i<t.length;i+=1){t[i].innerHTML=t[i].getAttribute("data-tex")}d.addEventListener("DOMContentLoaded",function(){renderMathInElement(c.parentElement,{delimiters:[{left:"$$",right:"$$",display:true},{left:"$",right:"$",display:false}]})});</script>"#));
 }
 
 /// Create a #[doc] attribute with the given doc comment.
@@ -221,10 +222,11 @@ fn doc_attribute(doc: &str) -> Attribute {
 }
 
 /// Replace all newlines in math blocks with spaces and place the math blocks
-/// inside `<div>` elements.
+/// inside `<span data-tex="...">...</span>` elements.
 ///
-/// This avoids rendering issues. For example, starting a line with "-" (minus)
-/// in the math block would otherwise cause the markdown to render as a list and
+/// This avoids rendering issues in the output HTML, while still providing
+/// mostly decent hovers. For example, starting a line with "-" (minus) in the
+/// math block would otherwise cause the markdown to render as a list and
 /// completely break the math, or writing `[a](b)` would render as a link.
 fn collapse_math(text: &str) -> String {
     // Regex to replace all continuous whitespace with a single space.
@@ -234,7 +236,8 @@ fn collapse_math(text: &str) -> String {
         .map(|event| match event {
             parser::Event::Text(text) => text.to_owned(),
             parser::Event::Math(math) => {
-                format!("<div>{}</div>", re.replace_all(math, " "))
+                let math = re.replace_all(math, " ");
+                format!(r#"<span class="docext-math" data-tex="{math}">{math}</span>"#,)
             }
         })
         .collect()
