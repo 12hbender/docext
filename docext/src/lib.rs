@@ -144,10 +144,10 @@ pub fn docext(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-/// Add KaTeX to the doc comment of the given item.
+/// Enable KaTeX rendering for the doc comment in the given item attributes.
 fn add_tex(attrs: &mut Vec<Attribute>) {
-    // Error if the item doesn't have a doc comment, since #[docext] wouldn't do
-    // anything useful in this case.
+    // Error if there is no doc comment, since #[docext] wouldn't do anything useful
+    // in this case.
     if !attrs.iter().any(|attr| {
         let Ok(name_value) = attr.meta.require_name_value() else {
             return false;
@@ -157,9 +157,8 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
         panic!("#[docext] only applies to items with doc comments");
     }
 
-    let mut doc = String::new();
-
     // Remove doc comments from the attrs and collect them into a single string.
+    let mut doc = String::new();
     *attrs = std::mem::take(attrs)
         .into_iter()
         .filter_map(|attr| {
@@ -183,8 +182,26 @@ fn add_tex(attrs: &mut Vec<Attribute>) {
         })
         .collect();
 
-    // Pre-process the math.
-    let doc = collapse_math(&doc);
+    // Regex to replace all continuous whitespace with a single space.
+    let re = Regex::new(r"\s+").unwrap();
+
+    // Collapse all newlines and whitespace in math blocks into single spaces and
+    // place the math blocks inside <span data-tex="...">...</span> elements.
+    //
+    // This avoids rendering issues in the output HTML, while still providing
+    // mostly decent IDE hovers. For example, starting a line with "-" (minus) in
+    // the math block would otherwise cause the markdown to render as a list and
+    // completely break the math, or writing $[a](b)$ would render as a link.
+    let doc: String = parser::parse_math(&doc)
+        .into_iter()
+        .map(|event| match event {
+            parser::Event::Text(text) => text.to_owned(),
+            parser::Event::Math(math) => {
+                let math = re.replace_all(math, " ");
+                format!(r#"<span class="docext-math" data-tex="{math}">{math}</span>"#,)
+            }
+        })
+        .collect();
 
     // Add the doc comment back to the attrs.
     attrs.push(doc_attribute(&doc));
@@ -219,26 +236,4 @@ fn doc_attribute(doc: &str) -> Attribute {
             }),
         }),
     }
-}
-
-/// Replace all newlines in math blocks with spaces and place the math blocks
-/// inside `<span data-tex="...">...</span>` elements.
-///
-/// This avoids rendering issues in the output HTML, while still providing
-/// mostly decent hovers. For example, starting a line with "-" (minus) in the
-/// math block would otherwise cause the markdown to render as a list and
-/// completely break the math, or writing `[a](b)` would render as a link.
-fn collapse_math(text: &str) -> String {
-    // Regex to replace all continuous whitespace with a single space.
-    let re = Regex::new(r"\s+").unwrap();
-    parser::parse_math(text)
-        .into_iter()
-        .map(|event| match event {
-            parser::Event::Text(text) => text.to_owned(),
-            parser::Event::Math(math) => {
-                let math = re.replace_all(math, " ");
-                format!(r#"<span class="docext-math" data-tex="{math}">{math}</span>"#,)
-            }
-        })
-        .collect()
 }
