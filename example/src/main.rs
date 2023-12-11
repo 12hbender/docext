@@ -86,6 +86,20 @@ pub trait Images {}
 //#[docext]
 pub trait BrokenImageInTex {}
 
+/// Hey there
+///
+/// $$
+/// x = y = z
+/// $$
+///
+/// Bye there
+#[docext]
+pub trait TraitWithItems {
+    /// Some $a$.
+    #[docext]
+    const A: usize;
+}
+
 fn main() {
     println!("Hello, world!");
 }

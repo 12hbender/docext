@@ -250,6 +250,7 @@ fn add_tex(doc: String) -> String {
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
 <script>
+(function(){
     var d=document;
     var c=d.currentScript;
     var t=c.parentElement.getElementsByClassName("docext-math");
@@ -259,6 +260,7 @@ fn add_tex(doc: String) -> String {
             delimiters:[{left:"$$",right:"$$",display:true},{left:"$",right:"$",display:false}]
         })
     });
+})()
 </script>"#
 }
 
@@ -331,13 +333,15 @@ fn add_images(doc: String) -> String {
         // At least use getElementsWithClassName instead of querySelectorAll
         + r#"
 <script>
-var elem = document.currentScript.parentElement;
-document.addEventListener("DOMContentLoaded",function(){
-    elem.querySelectorAll(".docext-img").forEach(function(e){
-        console.log(e.getAttribute("data-path"));
-        elem.querySelector("img[src='" + e.getAttribute("data-src") + "']").src = e.getAttribute("data-img")
+(function(){
+    var elem = document.currentScript.parentElement;
+    document.addEventListener("DOMContentLoaded",function(){
+        elem.querySelectorAll(".docext-img").forEach(function(e){
+            console.log(e.getAttribute("data-path"));
+            elem.querySelector("img[src='" + e.getAttribute("data-src") + "']").src = e.getAttribute("data-img")
+        });
     });
-});
+})()
 </script>
 "#
 }
