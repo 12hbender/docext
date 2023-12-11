@@ -1,6 +1,6 @@
 [package]
 name = "docext"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 description = "docext"
 license = "Unlicense"
@@ -13,3 +13,6 @@ quote = "1.0"
 syn = { version  = "2.0", features = ["full", "extra-traits"] }
 proc-macro2 = "1.0"
 regex = "1.9"
+pulldown-cmark = "0.9.3"
+url = "2.5.0"
+base64 = "0.21.5"

@@ -44,7 +44,7 @@ pub enum Event<'a> {
     Math(&'a str),
 }
 
-/// Find the end of the math block, while respecting braces. Return the byte
+/// Find the end of the math block, while respecting braces. Return the char
 /// index pointing after the end of the closing delimiter of the math block.
 fn find_math_end(text: &str, delim: &str, start: usize) -> Option<usize> {
     let start = start + delim.len();

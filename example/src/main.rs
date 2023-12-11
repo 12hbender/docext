@@ -51,7 +51,7 @@ pub trait IntentionallyInvalidTeX {}
 #[docext]
 pub trait BackslashAsNewline {}
 
-/// $\pi$
+/// Hey $\pi$ there
 ///
 /// Should not be rendered as a link:
 ///
@@ -59,13 +59,32 @@ pub trait BackslashAsNewline {}
 /// [a](b)
 /// $$
 ///
-/// Inline:
+/// _Inline_:
 ///
 /// Hello $[a](b)$ world.
 ///
 /// Hello $\int_0^{\infty}, \sigma = \pi$ world.
 #[docext]
 pub trait LinkGoneWrong {}
+
+/// Hey there
+///
+/// ![pepega](img/pepega.png)
+///
+/// Bye there
+#[docext]
+pub trait Images {}
+
+// TODO Extreme edge case, but should be fixed
+/// Hey there
+///
+/// $$
+/// ![pepega](img/pepegas.png)
+/// $$
+///
+/// Bye there
+//#[docext]
+pub trait BrokenImageInTex {}
 
 fn main() {
     println!("Hello, world!");
