@@ -73,6 +73,16 @@ pub trait LinkGoneWrong {}
 ///
 /// Bye there
 #[docext]
+pub trait Image {}
+
+/// Hey there
+///
+/// ![pepega](img/pepega.png)
+/// ![pepega](img/pepega.png)
+/// ![pepega2](img/pepega2.png)
+///
+/// Bye there
+#[docext]
 pub trait Images {}
 
 // TODO Extreme edge case, but should be fixed
@@ -82,8 +92,12 @@ pub trait Images {}
 /// ![pepega](img/pepegas.png)
 /// $$
 ///
+/// $$
+/// ![pepega](img/pepega.png)
+/// $$
+///
 /// Bye there
-//#[docext]
+#[docext]
 pub trait BrokenImageInTex {}
 
 /// Hey there
