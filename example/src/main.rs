@@ -114,6 +114,17 @@ pub trait TraitWithItems {
     const A: usize;
 }
 
+/// Hey there $what$ the hell
+///
+/// What is this $\mathrm{AB}_{16}$ and also $\mathrm{CD}_{16}$ and some
+/// $\mathrm{EF}_{16}$.
+#[docext]
+pub trait BrokenItalics {
+    /// Some $a$.
+    #[docext]
+    const A: usize;
+}
+
 fn main() {
     println!("Hello, world!");
 }

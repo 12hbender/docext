@@ -226,7 +226,9 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
                 // replace the math blocks with <span data-tex="MATH">MATH</span> elements. The
                 // reason for this is explained below.
                 let math = re.replace_all(math, " ");
-                format!(r#"<span class="docext-math" data-tex="{math}">{math}</span>"#)
+                // Escape "_" and "*" so that italics and bold text don't break the math.
+                let escaped = math.replace('_', "\\_").replace('*', "\\*");
+                format!(r#"<span class="docext-math" data-tex="{math}">{escaped}</span>"#)
             }
         })
         .collect();
