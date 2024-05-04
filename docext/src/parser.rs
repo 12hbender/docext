@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 /// Parse the given input into sequences of text and math blocks.
 ///
 /// This is implemented based on the [KaTeX auto-render script](https://github.com/KaTeX/KaTeX/blob/4f1d9166749ca4bd669381b84b45589f1500a476/contrib/auto-render/splitAtDelimiters.js).
@@ -26,7 +28,7 @@ pub fn parse_math(mut text: &str) -> Vec<Event<'_>> {
                 if start != 0 {
                     events.push(Event::Text(&text[..start]));
                 }
-                events.push(Event::Math(&text[start..end]));
+                events.push(Event::Math(&text[start..end], start..end));
                 text = &text[end..];
             }
             None => {
@@ -41,7 +43,7 @@ pub fn parse_math(mut text: &str) -> Vec<Event<'_>> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Event<'a> {
     Text(&'a str),
-    Math(&'a str),
+    Math(&'a str, Range<usize>),
 }
 
 /// Find the end of the math block, while respecting braces. Return the char
@@ -78,7 +80,21 @@ fn find_math_end(text: &str, delim: &str, start: usize) -> Option<usize> {
 mod test {
     //! Tests for the parser inspired by the [KaTeX auto-render tests](https://github.com/KaTeX/KaTeX/blob/4f1d9166749ca4bd669381b84b45589f1500a476/contrib/auto-render/test/auto-render-spec.js).
 
-    use super::*;
+    #[derive(Debug, PartialEq, Eq)]
+    enum Event<'a> {
+        Text(&'a str),
+        Math(&'a str),
+    }
+
+    fn parse_math(text: &str) -> Vec<Event> {
+        super::parse_math(text)
+            .into_iter()
+            .map(|event| match event {
+                super::Event::Text(text) => Event::Text(text),
+                super::Event::Math(math, _) => Event::Math(math),
+            })
+            .collect()
+    }
 
     /// Doesn't parse math if there are no math block delimiters.
     #[test]

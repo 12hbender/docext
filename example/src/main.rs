@@ -82,10 +82,13 @@ pub trait Image {}
 /// ![pepega2](img/pepega2.png)
 ///
 /// Bye there
+///
+/// Some $math$ text.
 #[docext]
 pub trait Images {}
 
 // TODO Extreme edge case, but should be fixed
+// TODO Should probably treat the file as a url...?
 /// Hey there
 ///
 /// $$
@@ -97,7 +100,7 @@ pub trait Images {}
 /// $$
 ///
 /// Bye there
-#[docext]
+//#[docext]
 pub trait BrokenImageInTex {}
 
 /// Hey there
@@ -125,6 +128,20 @@ pub trait BrokenItalics {
     const A: usize;
 }
 
-fn main() {
-    println!("Hello, world!");
-}
+/// Math in code block:
+/// ```
+/// $$
+/// This does not get rendered correctly.
+/// $$
+/// ```
+/// Math in inline code: `$This, too.$`
+/// Math outside code block: $\pi$
+#[docext]
+pub trait MathInCode {}
+
+/// Top-level function comment.
+/// $$
+/// x = \pi
+/// $$
+#[docext]
+fn main() {}

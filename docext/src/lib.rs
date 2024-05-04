@@ -35,8 +35,6 @@ mod parser;
 
 // TODO:
 // - Remove the dependency on url and base64 and implement this manually instead
-// - Inline the KaTeX CSS and JS instead of loading it from a CDN, probably use
-//   the same span attribute trick
 
 #[proc_macro_attribute]
 pub fn docext(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -194,6 +192,39 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
 
     // Paths to local images used in the doc comment.
     let mut imgs = HashSet::new();
+    // Spans of code blocks and inline code in the doc comment. These are needed to
+    // ensure that math is not rendered inside of markdown code blocks.
+    let mut code_sections = Vec::new();
+
+    // Same options as in rustdoc.
+    let opts = pulldown_cmark::Options::ENABLE_TABLES
+        | pulldown_cmark::Options::ENABLE_FOOTNOTES
+        | pulldown_cmark::Options::ENABLE_STRIKETHROUGH
+        | pulldown_cmark::Options::ENABLE_TASKLISTS
+        | pulldown_cmark::Options::ENABLE_SMART_PUNCTUATION;
+    // Parse the doc markdown.
+    for (ev, range) in pulldown_cmark::Parser::new_ext(&doc, opts).into_offset_iter() {
+        match ev {
+            // Collect all images that are not URLs. These will be encoded as base64 data and
+            // inserted into the doc comment as HTML tags, to be loaded and rendered by an
+            // image rendering script.
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Image {
+                dest_url: path_or_url,
+                ..
+            }) => {
+                if Url::parse(&path_or_url).is_err() {
+                    // This is not a URL, so it must be a path to a local image.
+                    imgs.insert(path_or_url);
+                }
+            }
+            // Collect all code sections to avoid rendering math inside of them.
+            pulldown_cmark::Event::Code(..)
+            | pulldown_cmark::Event::Start(pulldown_cmark::Tag::CodeBlock(..)) => {
+                code_sections.push(range);
+            }
+            _ => {}
+        }
+    }
 
     // Regex to replace all continuous whitespace (including newlines) with a single
     // space.
@@ -203,29 +234,26 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
         .into_iter()
         .map(|event| match event {
             parser::Event::Text(text) => {
-                // Collect all local image paths used in the doc comment.
-                for ev in pulldown_cmark::Parser::new(text) {
-                    if let pulldown_cmark::Event::Start(pulldown_cmark::Tag::Image(
-                        _,
-                        path_or_url,
-                        _,
-                    )) = ev
-                    {
-                        if Url::parse(&path_or_url).is_err() {
-                            // This is not a URL, so it must be a path to a local image.
-                            imgs.insert(path_or_url);
-                        }
-                    }
-                }
-
                 // No need to change the markdown text.
                 text.to_owned()
             }
-            parser::Event::Math(math) => {
+            parser::Event::Math(math, range)
+                if code_sections
+                    .iter()
+                    // Note: this could be a binary search, since the code sections are sorted.
+                    // But it's unlikely there will be so many code sections in a single doc
+                    // comment for the binary search to be worth it.
+                    .any(|section| section.start <= range.start && range.end <= section.end) =>
+            {
+                // Don't render math sections in code blocks.
+                math.to_owned()
+            }
+            parser::Event::Math(math, ..) => {
                 // Collapse all newlines and whitespace in math blocks into single spaces and
                 // replace the math blocks with <span data-tex="MATH">MATH</span> elements. The
                 // reason for this is explained below.
                 let math = re.replace_all(math, " ");
+                // TODO Escape all punctuation: https://spec.commonmark.org/0.31.2/#backslash-escapes
                 // Escape "_" and "*" so that italics and bold text don't break the math.
                 let escaped = math.replace('_', "\\_").replace('*', "\\*");
                 format!(r#"<span class="docext-math" data-tex="{math}">{escaped}</span>"#)
