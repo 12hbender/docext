@@ -226,9 +226,13 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
         }
     }
 
-    // Regex to replace all continuous whitespace (including newlines) with a single
-    // space.
-    let re = Regex::new(r"\s+").unwrap();
+    // Regex matching continuous whitespace (including newlines).
+    let whitespace = Regex::new(r"\s+").unwrap();
+    // Regex matching ASCII punctuation characters (https://spec.commonmark.org/0.31.2/#ascii-punctuation-character).
+    let punctuation = Regex::new(
+        r##"(?<punct>[\!\"\#\$\%\&\'\(\)\*\+\,\-\.\/\:\;<\=>\?\@\[\\\]\^\_\`\{\|\}\~])"##,
+    )
+    .unwrap();
 
     let mut doc: String = parser::parse_math(&doc)
         .into_iter()
@@ -252,10 +256,10 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
                 // Collapse all newlines and whitespace in math blocks into single spaces and
                 // replace the math blocks with <span data-tex="MATH">MATH</span> elements. The
                 // reason for this is explained below.
-                let math = re.replace_all(math, " ");
-                // TODO Escape all punctuation: https://spec.commonmark.org/0.31.2/#backslash-escapes
-                // Escape "_" and "*" so that italics and bold text don't break the math.
-                let escaped = math.replace('_', "\\_").replace('*', "\\*");
+                let math = whitespace.replace_all(math, " ");
+                // Escape punctuation (https://spec.commonmark.org/0.31.2/#backslash-escapes) so
+                // that e.g. italics and bold text don't break the math.
+                let escaped = punctuation.replace_all(&math, r"\$punct");
                 format!(r#"<span class="docext-math" data-tex="{math}">{escaped}</span>"#)
             }
         })
