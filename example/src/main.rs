@@ -4,11 +4,14 @@ use docext::docext;
 
 /// Should render as "1 - 2" followed by a pi symbol in the next line.
 ///
+/// Hello\.
+///
+/// \- What is this
+///
 /// $$1
 /// -
 /// 2\newline
 /// \pi
-///
 /// $$
 #[docext]
 pub trait BrokenExample {}
@@ -87,9 +90,8 @@ pub trait Image {}
 #[docext]
 pub trait Images {}
 
-// TODO Extreme edge case, but should be fixed
-// TODO Should probably treat the file as a url...?
-/// Hey there
+/// Hey there. This one is supposed to fail when `#[docext]` is used,
+/// because the second image is missing.
 ///
 /// $$
 /// ![pepega](img/pepegas.png)
@@ -106,7 +108,7 @@ pub trait BrokenImageInTex {}
 /// Hey there
 ///
 /// $$
-/// x = y = z
+/// x = y = z - 2
 /// $$
 ///
 /// Bye there
@@ -118,6 +120,8 @@ pub trait TraitWithItems {
 }
 
 /// Hey there $what$ the hell
+///
+/// _Italics._
 ///
 /// What is this $\mathrm{AB}_{16}$ and also $\mathrm{CD}_{16}$ and some
 /// $\mathrm{EF}_{16}$.

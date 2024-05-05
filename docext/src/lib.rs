@@ -35,6 +35,11 @@ mod parser;
 
 // TODO:
 // - Remove the dependency on url and base64 and implement this manually instead
+// - Clean up the tests in example crate, make the explanations more clear.
+//   (I.e. what is expected vs. what is not expected maybe.) Probably put it all
+//   in one comment for easier checking. Or maybe put them each on separate
+//   methods.
+// - Add a feature to skip the image size check.
 
 #[proc_macro_attribute]
 pub fn docext(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -142,13 +147,13 @@ pub fn docext(attr: TokenStream, item: TokenStream) -> TokenStream {
                             update_doc(&mut m.attrs);
                             m.to_token_stream().into()
                         }
-                        other => panic!("Unsupported impl item type {other:#?}"),
+                        other => panic!("unsupported impl item type {other:#?}"),
                     }
                 }
-                other => panic!("Unsupported trait item type {other:#?}"),
+                other => panic!("unsupported trait item type {other:#?}"),
             }
         }
-        other => panic!("Unsupported item type {other:#?}"),
+        other => panic!("unsupported item type {other:#?}"),
     }
 }
 
@@ -226,8 +231,6 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
         }
     }
 
-    // Regex matching continuous whitespace (including newlines).
-    let whitespace = Regex::new(r"\s+").unwrap();
     // Regex matching ASCII punctuation characters (https://spec.commonmark.org/0.31.2/#ascii-punctuation-character).
     let punctuation = Regex::new(
         r##"(?<punct>[\!\"\#\$\%\&\'\(\)\*\+\,\-\.\/\:\;<\=>\?\@\[\\\]\^\_\`\{\|\}\~])"##,
@@ -238,7 +241,7 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
         .into_iter()
         .map(|event| match event {
             parser::Event::Text(text) => {
-                // No need to change the markdown text.
+                // Leave all regular markdown text unchanged.
                 text.to_owned()
             }
             parser::Event::Math(math, range)
@@ -249,47 +252,42 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
                     // comment for the binary search to be worth it.
                     .any(|section| section.start <= range.start && range.end <= section.end) =>
             {
-                // Don't render math sections in code blocks.
+                // Math sections inside code blocks are not rendered by KaTeX. Don't escape
+                // punctuation, leave them unchanged.
                 math.to_owned()
             }
             parser::Event::Math(math, ..) => {
-                // Collapse all newlines and whitespace in math blocks into single spaces and
-                // replace the math blocks with <span data-tex="MATH">MATH</span> elements. The
-                // reason for this is explained below.
-                let math = whitespace.replace_all(math, " ");
-                // Escape punctuation (https://spec.commonmark.org/0.31.2/#backslash-escapes) so
-                // that e.g. italics and bold text don't break the math.
-                let escaped = punctuation.replace_all(&math, r"\$punct");
-                format!(r#"<span class="docext-math" data-tex="{math}">{escaped}</span>"#)
+                if math.lines().any(|line| line.trim().is_empty()) {
+                    // The rustdoc markdown renderer interprets blank lines as starting a new
+                    // paragraph, which would break the math.
+                    panic!("blank lines in math blocks are not supported");
+                }
+                // Escape all punctuation characters. This is to ensure that the markdown
+                // renderer in rustdoc doesn't break the math. (Otherwise, for example starting
+                // a line with "-" (minus) in the math block would cause the
+                // markdown to render as a list and completely break the math,
+                // or for example writing $[a](b)$ would render as a link.)
+                punctuation.replace_all(math, r"\$punct").into_owned()
             }
         })
         .collect();
 
-    // Add the KaTeX CSS and JS to the doc comment, enabling TeX rending. The
-    // rendering script first copies the TeX from the data-tex attribute into the
-    // inner HTML of the span to ensure that the math is unaffected by
-    // markdown rendering. This avoids rendering issues in the output HTML, while
-    // still providing mostly decent IDE hovers.
-    //
-    // (Otherwise, for example starting a line with "-" (minus) in the math block
-    // would cause the markdown to render as a list and completely break the math,
-    // or for example writing $[a](b)$ would render as a link.)
-    //
-    // Finally, the script calls `renderMathInElement` on its parent, so that the
-    // TeX is only loaded in the doc comment, not the entire page.
+    // Add the KaTeX CSS and JS to the doc comment, enabling TeX rending. Add a
+    // rendering script which calls `renderMathInElement` on its parent, so
+    // that the TeX is only rendered in the doc comment, not the entire page.
     doc.push_str(r#"
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
 <script>
-(function(){
-    var d=document;
-    var c=d.currentScript;
-    var t=c.parentElement.getElementsByClassName("docext-math");
-    for(var i=0;i<t.length;i+=1){t[i].innerHTML=t[i].getAttribute("data-tex")};
-    d.addEventListener("DOMContentLoaded",function(){
-        renderMathInElement(c.parentElement,{
-            delimiters:[{left:"$$",right:"$$",display:true},{left:"$",right:"$",display:false}]
+(function() {
+    var parent = document.currentScript.parentElement;
+    document.addEventListener("DOMContentLoaded", function() {
+        renderMathInElement(parent, {
+            delimiters:[
+                { left: "$$", right: "$$", display: true },
+                { left: "$", right: "$", display: false }
+            ]
         })
     });
 })()
@@ -305,25 +303,31 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
         path.push(img.as_ref());
 
         // Ensure that the file is not too large, otherwise the compiler might crash.
-        let metadata = fs::metadata(&path)
-            .unwrap_or_else(|_| panic!("Failed to read image: {}", path.to_string_lossy()));
-        // TODO Maybe a cfg! for large files
+        let metadata = fs::metadata(&path).unwrap_or_else(|_| {
+            panic!(
+                r#"failed to stat image: "{}", is the file missing?"#,
+                path.to_string_lossy()
+            )
+        });
         if metadata.len() > 1024 * 1024 {
             panic!(
-                "Image file too large: {}, max size is 1MB",
+                r#"image file too large: "{}", max size is 1MB"#,
                 path.to_string_lossy()
             );
         }
 
         // Encode the image as base64.
-        let data = fs::read(&path)
-            .unwrap_or_else(|_| panic!("Failed to read image: {}", path.to_string_lossy()));
+        let data = fs::read(&path).unwrap_or_else(|_| {
+            panic!(
+                r#"failed to read image: "{}", is the file missing?"#,
+                path.to_string_lossy()
+            )
+        });
         let base64 = base64::engine::general_purpose::STANDARD.encode(&data);
 
         // The data URL requires a MIME type.
         let mime = mime(&path);
 
-        // TODO Split into multiple spans probably, check first if this causes problems
         // Add a span containing the image data encoded as base64.
         doc.push('\n');
         doc.push_str(&format!(
@@ -332,14 +336,14 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
     }
 
     if !imgs.is_empty() {
-        // Add the image rendering script to the doc comment.
+        // Add the image rendering script.
         doc.push_str(r#"
 <script>
-(function(){
+(function() {
     var elem = document.currentScript.parentElement;
-    document.addEventListener("DOMContentLoaded",function(){
-        elem.querySelectorAll(".docext-img").forEach(function(e){
-            elem.querySelectorAll("img[src='" + e.getAttribute("data-src") + "']").forEach(function(i){
+    document.addEventListener("DOMContentLoaded", function() {
+        elem.querySelectorAll(".docext-img").forEach(function(e) {
+            elem.querySelectorAll("img[src='" + e.getAttribute("data-src") + "']").forEach(function(i) {
                 i.src = e.getAttribute("data-img");
             });
         });
@@ -372,9 +376,12 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
 
 /// Get the MIME type of the given image path based on its extension.
 fn mime(path: &path::Path) -> &'static str {
-    let ext = path
-        .extension()
-        .unwrap_or_else(|| panic!("Image path has no extension: {}", path.to_string_lossy()));
+    let ext = path.extension().unwrap_or_else(|| {
+        panic!(
+            r#"image path has no extension: "{}""#,
+            path.to_string_lossy()
+        )
+    });
     match ext.to_string_lossy().as_ref() {
         "apng" => "image/apng",
         "avif" => "image/avif",
@@ -386,6 +393,6 @@ fn mime(path: &path::Path) -> &'static str {
         "bmp" => "image/bmp",
         "ico" | "cur" => "image/x-icon",
         "tif" | "tiff" => "image/tiff",
-        _ => panic!("Unsupported image format: {}", ext.to_string_lossy()),
+        _ => panic!(r#"unsupported image format: "{}""#, ext.to_string_lossy()),
     }
 }
