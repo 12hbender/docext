@@ -90,8 +90,7 @@ pub trait Image {}
 #[docext]
 pub trait Images {}
 
-/// Hey there. This one is supposed to fail when `#[docext]` is used,
-/// because the second image is missing.
+/// Hey there.
 ///
 /// $$
 /// ![pepega](img/pepegas.png)
@@ -102,7 +101,7 @@ pub trait Images {}
 /// $$
 ///
 /// Bye there
-//#[docext]
+#[docext]
 pub trait BrokenImageInTex {}
 
 /// Hey there

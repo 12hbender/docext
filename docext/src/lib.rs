@@ -195,39 +195,22 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
         })
         .collect();
 
-    // Paths to local images used in the doc comment.
-    let mut imgs = HashSet::new();
-    // Spans of code blocks and inline code in the doc comment. These are needed to
-    // ensure that math is not rendered inside of markdown code blocks.
-    let mut code_sections = Vec::new();
-
-    // Same options as in rustdoc.
+    // Markdown options used by rustdoc.
     let opts = pulldown_cmark::Options::ENABLE_TABLES
         | pulldown_cmark::Options::ENABLE_FOOTNOTES
         | pulldown_cmark::Options::ENABLE_STRIKETHROUGH
         | pulldown_cmark::Options::ENABLE_TASKLISTS
         | pulldown_cmark::Options::ENABLE_SMART_PUNCTUATION;
-    // Parse the doc markdown.
+
+    // Spans of code blocks in the doc comment. These are needed to ensure that math
+    // is not rendered inside of markdown code blocks.
+    let mut code_sections = Vec::new();
+    // Collect code sections from doc comment.
     for (ev, range) in pulldown_cmark::Parser::new_ext(&doc, opts).into_offset_iter() {
-        match ev {
-            // Collect all images that are not URLs. These will be encoded as base64 data and
-            // inserted into the doc comment as HTML tags, to be loaded and rendered by an
-            // image rendering script.
-            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Image {
-                dest_url: path_or_url,
-                ..
-            }) => {
-                if Url::parse(&path_or_url).is_err() {
-                    // This is not a URL, so it must be a path to a local image.
-                    imgs.insert(path_or_url);
-                }
-            }
-            // Collect all code sections to avoid rendering math inside of them.
-            pulldown_cmark::Event::Code(..)
-            | pulldown_cmark::Event::Start(pulldown_cmark::Tag::CodeBlock(..)) => {
-                code_sections.push(range);
-            }
-            _ => {}
+        if let pulldown_cmark::Event::Code(..)
+        | pulldown_cmark::Event::Start(pulldown_cmark::Tag::CodeBlock(..)) = ev
+        {
+            code_sections.push(range);
         }
     }
 
@@ -236,6 +219,10 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
         r##"(?<punct>[\!\"\#\$\%\&\'\(\)\*\+\,\-\.\/\:\;<\=>\?\@\[\\\]\^\_\`\{\|\}\~])"##,
     )
     .unwrap();
+
+    // Math sections in the doc comment, used to avoid encoding images as base64
+    // data if they happen to be inside of a math block.
+    let mut math_sections = Vec::new();
 
     let mut doc: String = parser::parse_math(&doc)
         .into_iter()
@@ -247,21 +234,19 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
             parser::Event::Math(math, range)
                 if code_sections
                     .iter()
-                    // Note: this could be a binary search, since the code sections are sorted.
-                    // But it's unlikely there will be so many code sections in a single doc
-                    // comment for the binary search to be worth it.
                     .any(|section| section.start <= range.start && range.end <= section.end) =>
             {
                 // Math sections inside code blocks are not rendered by KaTeX. Don't escape
                 // punctuation, leave them unchanged.
                 math.to_owned()
             }
-            parser::Event::Math(math, ..) => {
+            parser::Event::Math(math, range) => {
                 if math.lines().any(|line| line.trim().is_empty()) {
                     // The rustdoc markdown renderer interprets blank lines as starting a new
                     // paragraph, which would break the math.
                     panic!("blank lines in math blocks are not supported");
                 }
+                math_sections.push(range);
                 // Escape all punctuation characters. This is to ensure that the markdown
                 // renderer in rustdoc doesn't break the math. (Otherwise, for example starting
                 // a line with "-" (minus) in the math block would cause the
@@ -271,6 +256,39 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
             }
         })
         .collect();
+
+    // Paths to local images used in the doc comment.
+    let mut imgs = HashSet::new();
+    // Collect all images from the doc comment that are not URLs. These will be
+    // encoded as base64 data and inserted into the doc comment as HTML tags, to
+    // be loaded and rendered by an image rendering script.
+    for (ev, range) in pulldown_cmark::Parser::new_ext(&doc, opts).into_offset_iter() {
+        let pulldown_cmark::Event::Start(pulldown_cmark::Tag::Image {
+            dest_url: path_or_url,
+            ..
+        }) = ev
+        else {
+            // Not an image tag.
+            continue;
+        };
+        if Url::parse(&path_or_url).is_ok() {
+            // This is a URL, so it is not a local image.
+            continue;
+        }
+        if math_sections
+            .iter()
+            .any(|section| section.start <= range.start && range.end <= section.end)
+        {
+            // The image is inside a math block, so it should not be encoded as base64.
+            // This avoids the following (extreme) edge case: if there is a math block such
+            // as $![img](path/does/not_exist.png)$, docext would panic because it couldn't
+            // find the image at that path. The root cause of the issue is that the markdown
+            // parser does not recognize math blocks, so it interprets the math
+            // as a regular image tag.
+            continue;
+        }
+        imgs.insert(path_or_url.into_string());
+    }
 
     // Add the KaTeX CSS and JS to the doc comment, enabling TeX rending. Add a
     // rendering script which calls `renderMathInElement` on its parent, so
@@ -300,7 +318,7 @@ fn update_doc(attrs: &mut Vec<Attribute>) {
     for img in imgs.iter() {
         // Load the image relative to the current crate.
         let mut path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-        path.push(img.as_ref());
+        path.push(img);
 
         // Ensure that the file is not too large, otherwise the compiler might crash.
         let metadata = fs::metadata(&path).unwrap_or_else(|_| {
